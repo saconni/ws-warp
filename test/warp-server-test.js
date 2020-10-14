@@ -1,4 +1,4 @@
-let assert = require('assert');
+/*let assert = require('assert');
 let sinon = require('sinon')
 let express = require('express')
 let http = require('http')
@@ -176,4 +176,4 @@ async function assertAsyncThrows(promise) {
     thrown = true
   }
   assert.ok(thrown)
-}
+}*/
