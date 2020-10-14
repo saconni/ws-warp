@@ -1,0 +1,20 @@
+{
+  "name": "ws-warp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha -u tdd"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "mocha": "^8.1.3",
+    "sinon": "^9.1.0"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "uuid": "^8.3.1",
+    "ws": "^7.3.1"
+  }
+}
