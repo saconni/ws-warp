@@ -1,4 +1,4 @@
-
+let { v4: uuidv4 } = require('uuid');
 class WarpServer {
   constructor(warpCore, tcpServer, httpServer, wsServer, options = {}) {
     this.warpCore = warpCore,
@@ -7,20 +7,33 @@ class WarpServer {
     this.tcpSocketServer = tcpServer
     this.tcpSocketServer.on('connection', tcpSocket => this.handleTcpSocket(tcpSocket))
     this.webSocketServer.on('connection', webSocket => this.handleWebSocket(webSocket))
-
-    if(this.warpCore) {
-      this.warpCore.requestWarpConnection = (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
-    }
+    this.createConnectionId = options.createConnectionId || uuidv4
 
     this.options = {
       waitForTcpDataTimeout: 5000,
       waitForTcpWarpTimeout: 5000,
       waitForWebSocketDataTimeout: 5000,
-      waitForRouteCallback: 5000,
+      waitForRouteCallbackTimeout: 5000,
       lookForWarpRequestFn: (data) => null,
       ...options
+    }
+  }
+
+  async handleWebSocketMessage(webSocket, message) {
+    var match = /^(HELLO|CONN):(.+)/.exec(message)
+    if(!match) throw new Error('Invalid initial message')
+
+    if(match[1] === 'HELLO') {
+      let endpointId = match[2]
+      await this.warpCore.registerEndpoint(endpointId, webSocket, (connectionId, warpRequest) => {
+        webSocket.send(`REQ:${connectionId}`)
+      })
+      webSocket.send(`ACK:HELLO`)
+    }
+    else if(match[1] === 'CONN') {
+      let connectionId = match[2]
+      await this.warpCore.routeCallback(connectionId, webSocket, {timeout: this.options.waitForRouteCallbackTimeout})
+      webSocket.send(`ACK:CONN`)
     }
   }
 
@@ -37,11 +50,12 @@ class WarpServer {
           if(warpRequest.forwardHeaders) {
             tcpSocket.unshift(data)
           }
-          await this.warpCore.warpTcpSocket(warpRequest.enpointId, warpRequest.port, tcpSocket, this.options.waitForTcpWarpTimeout)
+          let { endpointId } = warpRequest
+          await this.warpCore.warpTcpSocket(tcpSocket, this.createConnectionId(), endpointId, warpRequest, this.options.waitForTcpWarpTimeout)
           tcpSocket.resume()
         }
         catch(err) {
-          socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+          tcpSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
         }
       }
       else {
@@ -59,19 +73,7 @@ class WarpServer {
   async handleWebSocket(webSocket) {
     try {
       let message = await waitForWebSocketMessage(webSocket, this.options.waitForWebSocketDataTimeout)
-      var match = /^(HELLO|CONN):(.+)/.exec(message)
-      if(!match) throw new Error('Invalid initial message')
-
-      if(match[1] === 'HELLO') {
-        let endpointId = match[2]
-        await this.warpCore.registerEndpoint(endpointId, webSocket)
-        webSocket.send(`ACK:HELLO`)
-      }
-      else if(match[1] === 'CONN') {
-        let connectionId = match[2]
-        await this.warpCore.routeCallback(connectionId, webSocket, {timeout: this.options.waitForRouteCallback})
-        webSocket.send(`ACK:CONN`)
-      }
+      await this.handleWebSocketMessage(webSocket, message)
     }
     catch (err) {
       //console.log(err)

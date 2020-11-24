@@ -12,7 +12,7 @@ let {
 
 suite('warp-server', () => {
   test('can handle a websocket that closes before sending any message', (done) => {
-    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), null)
+    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer())
     let webSocket = createFakeWebSocket()
     
     server.handleWebSocket(webSocket).then(() => {
@@ -39,7 +39,7 @@ suite('warp-server', () => {
 
   test('can handle a HELLO message and sends back an ACK message', (done) => {
     let core = createFakeWarpCore()
-    let server = new WarpServer(core, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), null)
+    let server = new WarpServer(core, createFakeTcpSocketServer(), null, createFakeWebSocketServer())
     let webSocket = createFakeWebSocket()
     
     server.handleWebSocket(webSocket).then(() => {
@@ -55,7 +55,7 @@ suite('warp-server', () => {
   })
 
   test('can handle a websocket that sends an invalid message', (done) => {
-    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), null)
+    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer())
     let webSocket = createFakeWebSocket()
     
     server.handleWebSocket(webSocket).then(() => {
@@ -68,12 +68,7 @@ suite('warp-server', () => {
   })
   
   test('can actually handle real sockets', async () => {
-    let core = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
-    })
+    let core = new WarpCore()
 
     let webSocketServer = new WebSocket.Server({
       port: 8080
@@ -84,6 +79,7 @@ suite('warp-server', () => {
     tcpServer.listen(8081)
 
     let server = new WarpServer(core, tcpServer, null, webSocketServer, {
+      createConnectionId: () => 'aConnectionId',
       lookForWarpRequestFn: (data) => {
         return {
           enpointId: '42',

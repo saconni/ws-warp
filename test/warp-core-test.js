@@ -8,32 +8,26 @@ let { createFakeWebSocket, createFakeTcpSocket } = require('./_utils')
 
 suite('warp-core', () => {
   test('can send a connection request to a registered endpoint', async () => {
-    let core = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
-    })
+    let core = new WarpCore()
     let webSocket = createFakeWebSocket()
     let tcpSocket = createFakeTcpSocket()
-    core.registerEndpoint('42', webSocket)
-    await assertAsyncThrows(core.warpTcpSocket('42', null, tcpSocket, {timeout: 10}))
+    core.registerEndpoint('42', webSocket, (connectionId, warpRequest) => {
+      webSocket.send(`REQ:${connectionId}`)
+    })
+    await assertAsyncThrows(core.warpTcpSocket(tcpSocket, 'aConnectionId', '42', null, {timeout:10}))
     assert.ok(webSocket.send.calledOnce)
     assert.ok(webSocket.send.calledWith('REQ:aConnectionId'))
   })
 
   test('can handle a connection callback after a warp request', async () => {
-    let core = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
-    })
+    let core = new WarpCore()
     let endpointWebSocket = createFakeWebSocket()
     let callbackWebSocket = createFakeWebSocket()
     let tcpSocket = createFakeTcpSocket()
-    core.registerEndpoint('42', endpointWebSocket)
-    let promiseOfWarp =  core.warpTcpSocket('42', null, tcpSocket, {timeout: 10})
+    core.registerEndpoint('42', endpointWebSocket, (connectionId, warpRequest) => {
+      endpointWebSocket.send(`REQ:${connectionId}`)
+    })
+    let promiseOfWarp =  core.warpTcpSocket(tcpSocket, 'aConnectionId', '42', null, {timeout: 10})
     await core.routeCallback('aConnectionId', callbackWebSocket, {timeout: 10})
     await promiseOfWarp
   })
@@ -59,19 +53,16 @@ suite('warp-core', () => {
   })
 
   test('can pipe ASCII data between entangled tcpSocket.connect() and web sockets', async () => {
-    let core = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
-    })
+    let core = new WarpCore()
     let endpointWebSocket = createFakeWebSocket()
     let callbackWebSocket = createFakeWebSocket()
     let tcpSocket = createFakeTcpSocket()
 
-    await core.registerEndpoint(42, endpointWebSocket)
+    await core.registerEndpoint(42, endpointWebSocket, (connectionId, warpRequest) => {
+      endpointWebSocket.send(`REQ:${connectionId}`)
+    })
 
-    let promiseOfWarp =  core.warpTcpSocket('42', null, tcpSocket, {timeout: 10})
+    let promiseOfWarp =  core.warpTcpSocket(tcpSocket, 'aConnectionId', '42', null, {timeout: 10})
 
     await core.routeCallback('aConnectionId', callbackWebSocket)
 
@@ -93,34 +84,24 @@ suite('warp-core', () => {
     }
   
     let coreA = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      ipcBroadcast: broadcast,
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
+      ipcBroadcast: broadcast
     })
     let coreB = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      ipcBroadcast: broadcast,
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
+      ipcBroadcast: broadcast
     })
     let coreC = new WarpCore({
-      createConnectionId: () => 'aConnectionId',
-      ipcBroadcast: broadcast,
-      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
-        webSocket.send(`REQ:${connectionId}`)
-      }
+      ipcBroadcast: broadcast
     })
   
     let endpointWebSocket = createFakeWebSocket()
     let callbackWebSocket = createFakeWebSocket()
     let tcpSocket = createFakeTcpSocket()
     
-    await coreA.registerEndpoint(42, endpointWebSocket)
+    await coreA.registerEndpoint(42, endpointWebSocket, (connectionId, warpRequest) => {
+      endpointWebSocket.send(`REQ:${connectionId}`)
+    })
   
-    let promiseOfWarp = coreB.warpTcpSocket('42', null, tcpSocket, {timeout: 10})
+    let promiseOfWarp = coreB.warpTcpSocket(tcpSocket, 'aConnectionId', '42', null, {timeout: 10})
     
     await coreC.routeCallback('aConnectionId', callbackWebSocket, {timeout: 10})
   

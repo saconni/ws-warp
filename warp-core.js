@@ -3,16 +3,14 @@ let { v4: uuidv4 } = require('uuid');
 
 class WarpCore {
   constructor(options = {}) {
-    this.createConnectionId = options.createConnectionId || uuidv4
     this.ipcBroadcast = options.ipcBroadcast || function() {}
-    this.requestWarpConnection = options.requestWarpConnection
     this.coreId = uuidv4()
     this.bus = new EventEmitter()
   }
 
-  registerEndpoint(endpointId, webSocket) {
+  registerEndpoint(endpointId, webSocket, sendWarpRequest) {
     let warpRequestHandler = (connectionId, warpRequest) => {
-      this.requestWarpConnection(webSocket, connectionId, warpRequest)
+      sendWarpRequest(connectionId, warpRequest)
     }
 
     this.bus.on(`warpRequest:${endpointId}`, warpRequestHandler)
@@ -36,12 +34,11 @@ class WarpCore {
     })
   }
 
-  async warpTcpSocket(endpointId, endpointPort, tcpSocket, options = {}) {
+  async warpTcpSocket(tcpSocket, connectionId, endpointId, warpRequest, options = {}) {
     let timeout = options.timeout || 5000
-    let connectionId = this.createConnectionId()
 
     let promiseOfCallback = this.waitForBusEvent(`warpCallback:${connectionId}`, timeout)
-    this.emit(`warpRequest:${endpointId}`, null, connectionId, endpointPort)
+    this.emit(`warpRequest:${endpointId}`, null, connectionId, warpRequest)
     await promiseOfCallback
 
     let promiseOfWarpDone = this.waitForBusEvent(`warpDone:${connectionId}`, timeout)
