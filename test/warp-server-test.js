@@ -1,82 +1,156 @@
-/*let assert = require('assert');
-let sinon = require('sinon')
-let express = require('express')
-let http = require('http')
-let { EventEmitter } = require('events');
-let WebSocket = require('ws');
 let net = require('net')
+let assert = require('assert');
+let WebSocket = require('ws');
 let { WarpCore } = require('../warp-core')
+let { WarpServer } = require('../warp-server')
+let { 
+  createFakeWebSocket, 
+  createFakeWebSocketServer, 
+  createFakeTcpSocketServer,
+  createFakeWarpCore
+} = require('./_utils');
 
 suite('warp-server', () => {
+  test('can handle a websocket that closes before sending any message', (done) => {
+    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), null)
+    let webSocket = createFakeWebSocket()
+    
+    server.handleWebSocket(webSocket).then(() => {
+      assert.ok(webSocket.terminate.calledOnce)
+    }).finally(() => {
+      done()
+    })
+
+    webSocket.emit('close')
+  })
+
+  test('can handle a websocket that does not send anything', (done) => {
+    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), {
+      waitForWebSocketDataTimeout: 1
+    })
+    let webSocket = createFakeWebSocket()
+    
+    server.handleWebSocket(webSocket).then(() => {
+      assert.ok(webSocket.terminate.calledOnce)
+    }).finally(() => {
+      done()
+    })
+  })
+
+  test('can handle a HELLO message and sends back an ACK message', (done) => {
+    let core = createFakeWarpCore()
+    let server = new WarpServer(core, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), null)
+    let webSocket = createFakeWebSocket()
+    
+    server.handleWebSocket(webSocket).then(() => {
+      assert.ok(webSocket.send.calledOnce)
+      assert.ok(webSocket.send.calledWith('ACK:HELLO'))
+      assert.ok(core.registerEndpoint.calledOnce)
+      assert.ok(core.registerEndpoint.calledWith('42', webSocket))
+    }).finally(() => {
+      done()
+    })
+
+    webSocket.emit('message', 'HELLO:42')
+  })
+
+  test('can handle a websocket that sends an invalid message', (done) => {
+    let server = new WarpServer(null, createFakeTcpSocketServer(), null, createFakeWebSocketServer(), null)
+    let webSocket = createFakeWebSocket()
+    
+    server.handleWebSocket(webSocket).then(() => {
+      assert.ok(webSocket.terminate.calledOnce)
+    }).finally(() => {
+      done()
+    })
+
+    webSocket.emit('message', 'INVALID')
+  })
+  
   test('can actually handle real sockets', async () => {
-    let app = express()
-    let httpServer = http.createServer(app)
-    let webSocketServer = new WebSocket.Server({server: httpServer})
-    let warpCore = new WarpCore({createConnectionId: () => 'connectionId'})
-    let warpServer = new WarpServer(warpCore, httpServer, webSocketServer, net)
+    let core = new WarpCore({
+      createConnectionId: () => 'aConnectionId',
+      requestWarpConnection: (webSocket, connectionId, warpRequest) => {
+        webSocket.send(`REQ:${connectionId}`)
+      }
+    })
 
-    webSocketServer.on('connection', async ws => {
-      await core.handleWebSocket(ws, {timeout: 10}).catch(e => err = e)
-      bus.emit('websocket-handled')
-    });
+    let webSocketServer = new WebSocket.Server({
+      port: 8080
+    })
 
-    let tcpServer = net.createServer(async socket => {
-      await core.warpTcpSocket('42', socket, { timeout: 10 })
-      bus.emit('tcpsocket-warped')
-    }).on('error', err => { throw err })
+    let tcpServer = net.createServer()
+    
     tcpServer.listen(8081)
 
-    let bus = new EventEmitter()
+    let server = new WarpServer(core, tcpServer, null, webSocketServer, {
+      lookForWarpRequestFn: (data) => {
+        return {
+          enpointId: '42',
+          forwardHeaders: true
+        }
+      }
+    })
 
     let tcpSocketReceivedData = ''
     let webSocketReceivedData = ''
 
     //
-    // connect the endpoint
+    // connect the websocket endpoint
+    // send HELLO:42
+    // wait for ACK:HELLO
     //
-    
-    let webSocketHandled = waitForBusEvent(bus, 'websocket-handled', 500)
-
     let endpointWebSocket = new WebSocket('ws://localhost:8080')
+
     endpointWebSocket.on('open', () => {
       endpointWebSocket.send('HELLO:42')
     })
 
-    await webSocketHandled
+    await new Promise((resolve, reject) => {
+      endpointWebSocket.on('message', msg => {
+        if(msg === 'ACK:HELLO') resolve()
+      })
+    })
 
     //
     // connect the tcp socket
+    // send any header on connect, WarpCore will warp to '42' with forwardHeader: true
     //
-
-    let tcpSocketWarped = waitForBusEvent(bus, 'tcpsocket-warped', 500)
-
     let tcpSocket = new net.Socket();
-    tcpSocket.connect(8081, 'localhost', () => {
-
-    })
 
     tcpSocket.on('data', (data) => {
       tcpSocketReceivedData += data.toString('utf-8')
     })
 
+    await new Promise((resolve, reject) => {
+      tcpSocket.connect(8081, 'localhost', () => {
+        tcpSocket.write('header from tcp socket')
+        resolve()
+      })
+    })
+      
     //
-    // connect the callback
+    // connect the websocket callback
+    // send CONN:aConnectionId
+    // wait for ACK:CONN
     //
-
-    webSocketHandled = waitForBusEvent(bus, 'websocket-handled', 500)
-
     let callbackWebSocket = new WebSocket('ws://localhost:8080')
+
+    let callbackWebSocketHandled = new Promise((resolve, reject) => {
+      callbackWebSocket.on('message', message => {
+        if(message === 'ACK:CONN') {
+          resolve()
+        }
+        webSocketReceivedData += message
+      })
+    })
+
     callbackWebSocket.on('open', () => {
       callbackWebSocket.send('CONN:aConnectionId')
     })
-    
-    callbackWebSocket.on('message', message => {
-      webSocketReceivedData += message
-    })
 
-    await webSocketHandled
+    await callbackWebSocketHandled
 
-    await tcpSocketWarped
 
     //
     // exchange some data
@@ -93,87 +167,7 @@ suite('warp-server', () => {
     webSocketServer.close()
     tcpServer.close()
 
-    assert.strictEqual('from tcp socket to web socket', webSocketReceivedData)
+    assert.strictEqual('ACK:CONNheader from tcp socketfrom tcp socket to web socket', webSocketReceivedData)
     assert.strictEqual('from web socket to tcp socket', tcpSocketReceivedData)
   })
 })
-
-function waitForBusEvent(eventBus, event, timeout) {
-  return new Promise((resolve, reject) => {
-    let promiseHandler = () => {
-      clearTimeout(timerId)
-      resolve()
-    }
-    let timerId = setTimeout(() => {
-      eventBus.removeListener(event, promiseHandler)
-      reject(new Error(`Test timeout while waiting for ${event}`))
-    }, timeout)
-    eventBus.once(event, promiseHandler)
-  })
-}
-
-function createFakeWebSocket() {
-  let webSocket = new EventEmitter()
-  webSocket.send = sinon.fake()
-  webSocket.terminate = sinon.fake()
-  webSocket._socket = createFakeTcpSocket()
-  return webSocket  
-}
-
-function createFakeTcpSocket() {
-  let tcpSocket = new EventEmitter()
-  tcpSocket.pause = sinon.fake()
-  tcpSocket.resume = sinon.fake()
-  tcpSocket.write = sinon.fake()
-  return tcpSocket
-}
-
-async function createClusteredWarpedSockets() {
-  let broadcast = (message, handle) => {
-    coreA.handleIpcBroadcast(message, handle)
-    coreB.handleIpcBroadcast(message, handle)
-    coreC.handleIpcBroadcast(message, handle)
-  }
-
-  let coreA = new WarpCore({
-    createConnectionId: () => 'aConnectionId',
-    ipcBroadcast: broadcast
-  })
-  let coreB = new WarpCore({
-    createConnectionId: () => 'aConnectionId',
-    ipcBroadcast: broadcast
-  })
-  let coreC = new WarpCore({
-    createConnectionId: () => 'aConnectionId',
-    ipcBroadcast: broadcast
-  })
-
-  let endpointWebSocket = createFakeWebSocket()
-  let callbackWebSocket = createFakeWebSocket()
-  let tcpSocket = createFakeTcpSocket()
-  
-  let endpointHandled = coreA.handleWebSocket(endpointWebSocket, {timeout: 10})
-  endpointWebSocket.emit('message', 'HELLO:42')
-  await endpointHandled
-
-  let promiseOfWarp = coreB.warpTcpSocket('42', tcpSocket, {timeout: 10})
-  
-  let callbackHandled = coreC.handleWebSocket(callbackWebSocket, {timeout: 10})
-  callbackWebSocket.emit('message', 'CONN:aConnectionId')
-  await callbackHandled
-
-  await promiseOfWarp
-
-  return [tcpSocket, callbackWebSocket]
-}
-
-async function assertAsyncThrows(promise) {
-  let thrown = false
-  try {
-    await promise
-  }
-  catch(err) {
-    thrown = true
-  }
-  assert.ok(thrown)
-}*/
